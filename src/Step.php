@@ -12,7 +12,7 @@ abstract class Step
      *
      * @var string
      */
-    public $name = '';
+    protected $name = '';
 
     /**
      * Массив данных через которых можно передавать ту или иную информацию между шагами.
@@ -91,6 +91,8 @@ abstract class Step
     }
 
     /**
+     * Логирование максимального потребления CPU.
+     *
      * @return $this
      */
     protected function logPeakMemoryUsage()
@@ -103,6 +105,17 @@ abstract class Step
         } else {
             $this->logger->info('Peak memory usage: ' . $usage / 1024 / 1024 . ' MB');
         }
+
+        return $this;
+    }
+    
+    /**
+     * Логирование load average за 1, 5 и 15 минут
+     * @return $this
+     */
+    public function logLoadAverage()
+    {
+        $this->logger->info("Load average: " . sys_getloadavg()[0], sys_getloadavg());
 
         return $this;
     }
@@ -261,6 +274,7 @@ abstract class Step
         $this->flushSqlLogs();
         $this->logCurrentMemoryUsage();
         $this->logPeakMemoryUsage();
+        $this->logLoadAverage();
 
         return $this;
     }

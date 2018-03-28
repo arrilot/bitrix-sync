@@ -92,6 +92,7 @@ class Sync
     public function perform()
     {
         $this->logger->info('Синхронизация начата');
+        $startTime = microtime(true);
         $this->adjustPhpSettings();
         $this->preventOverlapping();
         $this->normalizeSteps();
@@ -147,9 +148,15 @@ class Sync
 
             unset($step);
         }
-    
+
         $this->logger->info('==============================================');
         $this->logger->info('Синхронизация завершена');
+        $time = microtime(true) - $startTime;
+        if ($time > 60) {
+            $this->logger->info("Затраченное время: " . $time / 60 ." минут");
+        } else {
+            $this->logger->info("Затраченное время: " . $time ." секунд");
+        }
 
         $this->doEmailFinalLog();
     }
@@ -252,6 +259,87 @@ class Sync
 
         return $this;
     }
+    
+    
+    /**
+     * Выключает защиту от наложения синхронизаций друг на друга.
+     *
+     * @return $this
+     */
+    public function allowOverlapping()
+    {
+        $this->allowOverlapping = true;
+        
+        return $this;
+    }
+    
+    /**
+     * @return $this
+     */
+    public function profileSql()
+    {
+        $this->sqlLogsBitrix = true;
+        
+        return $this;
+    }
+    
+    /**
+     * Посылать ошибки на email. По-умолчанию посылает только критические
+     *
+     * @param array|string $emails
+     * @param int $level
+     * @return $this
+     */
+    public function emailErrorsTo($emails, $level = Logger::ALERT)
+    {
+        $title = sprintf('%s, %s: ошибка синхронизации "%s"', $this->siteName(), $this->env, $this->name);
+        $handler = (new NativeMailerHandler($emails, $title, $this->emailFrom(), $level))->setFormatter($this->formatterForLogger);
+        $this->logger->pushHandler($handler);
+        
+        return $this;
+    }
+
+    /**
+     * Послать окончательный лог синхронизации после её окончания на указанный email/email-ы.
+     *
+     * @param array|string $emails
+     * @return $this
+     */
+    public function emailFinalLogTo($emails)
+    {
+        $this->emailsForFinalLog = is_array($emails) ? $emails : (array) $emails;
+        
+        return $this;
+    }
+    
+    /**
+     * Удаляет все логи старше чем $days дней.
+     *
+     * @param $days
+     */
+    public function cleanOldLogs($days = 30)
+    {
+        $fileSystemIterator = new FilesystemIterator($this->logDir);
+        $now = time();
+        foreach ($fileSystemIterator as $file) {
+            if ($now - $file->getCTime() >= 60 * 60 * 24 * $days) {
+                unlink($this->logDir . '/' . $file->getFilename());
+            }
+        }
+    }
+    
+    /**
+     * Setter for $logdir.
+     *
+     * @param $dir
+     * @return $this
+     */
+    public function setLogDir($dir)
+    {
+        $this->logDir = $dir;
+
+        return $this;
+    }
 
     /**
      * Директория куда попадают логи.
@@ -340,73 +428,6 @@ class Sync
     protected function checkIlluminate()
     {
         return class_exists('Illuminate\Database\Capsule\Manager');
-    }
-
-    /**
-     * Выключает защиту от наложения синхронизаций друг на друга.
-     *
-     * @return $this
-     */
-    public function allowOverlapping()
-    {
-        $this->allowOverlapping = true;
-
-        return $this;
-    }
-
-    /**
-     * @return $this
-     */
-    public function profileSql()
-    {
-        $this->sqlLogsBitrix = true;
-
-        return $this;
-    }
-
-    /**
-     * Посылать ошибки на email. По-умолчанию посылает только критические
-     *
-     * @param array|string $emails
-     * @param int $level
-     * @return $this
-     */
-    public function emailErrorsTo($emails, $level = Logger::ALERT)
-    {
-        $title = sprintf('%s, %s: ошибка синхронизации "%s"', $this->siteName(), $this->env, $this->name);
-        $handler = (new NativeMailerHandler($emails, $title, $this->emailFrom(), $level))->setFormatter($this->formatterForLogger);
-        $this->logger->pushHandler($handler);
-
-        return $this;
-    }
-
-    /**
-     * Послать окончательный лог синхронизации после её окончания на указанный email/email-ы.
-     *
-     * @param array|string $emails
-     * @return $this
-     */
-    public function emailFinalLogTo($emails)
-    {
-        $this->emailsForFinalLog = is_array($emails) ? $emails : (array) $emails;
-
-        return $this;
-    }
-
-    /**
-     * Удаляет все логи старше чем $days дней.
-     *
-     * @param $days
-     */
-    public function cleanOldLogs($days = 30)
-    {
-        $fileSystemIterator = new FilesystemIterator($this->logDir);
-        $now = time();
-        foreach ($fileSystemIterator as $file) {
-            if ($now - $file->getCTime() >= 60 * 60 * 24 * $days) {
-                unlink($this->logDir . '/' . $file->getFilename());
-            }
-        }
     }
 
     /**
