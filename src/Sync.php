@@ -30,7 +30,6 @@ class Sync
     
     protected $logDir = '';
     protected $logFile = '';
-    protected $siteName = '';
     protected $sqlLogsBitrix = false;
     protected $sqlLogsIlluminate = false;
     protected $sharedData = [];
@@ -125,7 +124,6 @@ class Sync
                 $trace = $e->getTrace();
                 $this->logger->info('Шаг завершён как '. $status . '.', [
                     'message' => $e->getMessage(),
-                    'class' => $trace[0]['class'],
                     'line' => $trace[0]['line'],
                 ]);
     
@@ -133,7 +131,6 @@ class Sync
                 $trace = $e->getTrace();
                 $this->logger->info('Получена команда на завершение синхронизации.', [
                     'message' => $e->getMessage(),
-                    'class' => $trace[0]['class'],
                     'line' => $trace[0]['line'],
                 ]);
                 $step->onBeforeLogFinish();
@@ -509,7 +506,7 @@ class Sync
             "Content-Type: text/plain; charset=utf-8".PHP_EOL.
             "Content-Transfer-Encoding: 8bit";
 
-        $subject = sprintf('%s, %s: синхронизация "%s" завершёна', $this->siteName, $this->env, $this->name);
+        $subject = sprintf('%s, %s: синхронизация "%s" завершёна', $this->siteName(), $this->env, $this->name);
         $message = file_get_contents($this->logFile);
         if (!$message) {
             $message = 'Не удалось получить файл-лог ' . $this->logFile;
