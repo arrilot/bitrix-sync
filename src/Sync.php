@@ -451,6 +451,19 @@ class Sync
         register_shutdown_function(function ($lockFile) {
             unlink($lockFile);
         }, $this->lockFile);
+
+        // или получении сигналов на завершение скрипта
+        // работает в php 7.1+
+        if (function_exists('pcntl_async_signals')) {
+            pcntl_async_signals(true);
+
+            pcntl_signal(SIGINT, function ($error) {
+                unlink($this->lockFile);
+            });
+            pcntl_signal(SIGTERM, function ($error) {
+                unlink($this->lockFile);
+            });
+        }
     }
 
     /**
