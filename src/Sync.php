@@ -76,6 +76,10 @@ class Sync
         $this->env = $this->env();
 
         $this->logDir = $this->logDir($name);
+        if (!file_exists($this->logDir)) {
+            mkdir($this->logDir, 0755, true);
+        }
+
         $this->logger = new Logger($this->name);
         $this->formatterForLogger = new LineFormatter("[%datetime%] %level_name%: %message% %context%\n");
         $this->logFile = $this->logDir . '/' . date('Y_m_d_H_i_s') . '.log';
@@ -313,6 +317,7 @@ class Sync
      * Удаляет все логи старше чем $days дней.
      *
      * @param $days
+     * @return $this
      */
     public function cleanOldLogs($days = 30)
     {
@@ -323,6 +328,8 @@ class Sync
                 unlink($this->logDir . '/' . $file->getFilename());
             }
         }
+
+        return $this;
     }
     
     /**
