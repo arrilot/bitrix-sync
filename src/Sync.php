@@ -2,6 +2,8 @@
 
 namespace Arrilot\BitrixSync;
 
+use Arrilot\BitrixSync\Telegram\TelegramFormatter;
+use Arrilot\BitrixSync\Telegram\TelegramHandler;
 use Bitrix\Main\Config\Option;
 use Exception;
 use FilesystemIterator;
@@ -298,7 +300,7 @@ class Sync
         
         return $this;
     }
-    
+
     /**
      * Посылать ошибки на email. По-умолчанию посылает только критические
      *
@@ -308,8 +310,36 @@ class Sync
      */
     public function emailErrorsTo($emails, $level = Logger::ALERT)
     {
-        $title = sprintf('%s, %s: ошибка синхронизации "%s"', $this->siteName(), $this->env, $this->name);
-        $handler = (new NativeMailerHandler($emails, $title, $this->emailFrom(), $level))->setFormatter($this->formatterForLogger);
+        $handler = (new NativeMailerHandler($emails, $this->getAlertTitle(), $this->emailFrom(), $level))->setFormatter($this->formatterForLogger);
+        $this->logger->pushHandler($handler);
+
+        return $this;
+    }
+
+    /**
+     * @return string
+     */
+    protected function getAlertTitle()
+    {
+        return sprintf('%s, %s: ошибка синхронизации "%s"', $this->siteName(), $this->env, $this->name);
+    }
+    
+    /**
+     * Посылать ошибки на email. По-умолчанию посылает только критические
+     *
+     * @param $bot
+     * @param $channel
+     * @return $this
+     * @throws \Monolog\Handler\MissingExtensionException
+     */
+    public function sendAlertsToTelegram($bot, $channel)
+    {
+        if (!$bot || !$channel) {
+            return $this;
+        }
+
+        $handler = new TelegramHandler($bot, $channel, Logger::ALERT);
+        $handler->setFormatter(new TelegramFormatter($this->getAlertTitle()));
         $this->logger->pushHandler($handler);
         
         return $this;
