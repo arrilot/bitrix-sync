@@ -280,6 +280,18 @@ abstract class Step
     }
 
     /**
+     * @return $this
+     */
+    public function logFinishWithEvents()
+    {
+        $this->onBeforeLogFinish();
+        $this->logFinish();
+        $this->onAfterLogFinish();
+
+        return $this;
+    }
+
+    /**
      * Установка параметров для логирования SQL запросов.
      *
      * @param $sqlLogsBitrix

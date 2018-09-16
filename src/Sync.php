@@ -3,6 +3,7 @@
 namespace Arrilot\BitrixSync;
 
 use Bitrix\Main\Config\Option;
+use Exception;
 use FilesystemIterator;
 use Monolog\Formatter\LineFormatter;
 use Monolog\Handler\HandlerInterface;
@@ -14,6 +15,7 @@ use RuntimeException;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Bridge\Monolog\Handler\ConsoleHandler;
 use Symfony\Bridge\Monolog\Formatter\ConsoleFormatter;
+use Throwable;
 
 class Sync
 {
@@ -125,27 +127,40 @@ class Sync
                 } else {
                     $status = 'успешный';
                 }
-                $trace = $e->getTrace();
                 $this->logger->info('Шаг завершён как '. $status . '.', [
                     'message' => $e->getMessage(),
-                    'line' => $trace[0]['line'],
+                    'line' => $e->getLine(),
                 ]);
     
             } catch (StopSyncException $e) {
-                $trace = $e->getTrace();
                 $this->logger->info('Получена команда на завершение синхронизации.', [
                     'message' => $e->getMessage(),
-                    'line' => $trace[0]['line'],
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine(),
                 ]);
-                $step->onBeforeLogFinish();
-                $step->logFinish();
-                $step->onAfterLogFinish();
+                $step->logFinishWithEvents();
+                break;
+            } catch (Exception $e) {
+                $this->logger->alert('Было выброшено необработанное исключение наследующее \Exception. Синхронизация остановлена.', [
+                    'exception' => get_class($e),
+                    'message' => $e->getMessage(),
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine(),
+                ]);
+                $step->logFinishWithEvents();
+                break;
+            } catch (Throwable $e) {
+                $this->logger->alert('Было выброшено необработанное исключение реализующее \Throwable. Синхронизация остановлена.', [
+                    'exception' => get_class($e),
+                    'message' => $e->getMessage(),
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine(),
+                ]);
+                $step->logFinishWithEvents();
                 break;
             }
 
-            $step->onBeforeLogFinish();
-            $step->logFinish();
-            $step->onAfterLogFinish();
+            $step->logFinishWithEvents();
 
             unset($step);
         }
@@ -321,6 +336,10 @@ class Sync
      */
     public function cleanOldLogs($days = 30)
     {
+        if ($days === false) {
+            return $this;
+        }
+
         $fileSystemIterator = new FilesystemIterator($this->logDir);
         $now = time();
         foreach ($fileSystemIterator as $file) {
@@ -465,10 +484,14 @@ class Sync
             pcntl_async_signals(true);
 
             pcntl_signal(SIGINT, function ($error) {
+                $this->logger->error('Синхронизация была прекращена сигналом SIGINT.');
                 unlink($this->lockFile);
+                exit;
             });
             pcntl_signal(SIGTERM, function ($error) {
+                $this->logger->alert('Синхронизация была прекращена сигналом SIGTERM.');
                 unlink($this->lockFile);
+                exit;
             });
         }
     }
