@@ -2,6 +2,7 @@
 
 namespace Arrilot\BitrixSync\Telegram;
 
+use Bitrix\Main\Config\Option;
 use Monolog\Formatter\NormalizerFormatter;
 use Symfony\Component\Yaml\Yaml;
 
@@ -15,7 +16,7 @@ class TelegramFormatter extends NormalizerFormatter
     /**
      * @inheritDoc
      */
-    public function __construct($title, $dateFormat = null)
+    public function __construct($title = '', $dateFormat = null)
     {
         $this->title = $title;
         parent::__construct($dateFormat);
@@ -29,10 +30,16 @@ class TelegramFormatter extends NormalizerFormatter
      */
     public function format(array $record)
     {
-        $output = "<b>{$this->title}</b>".PHP_EOL;
+        if ($this->title) {
+            $output = "<b>{$this->title}</b>".PHP_EOL;
+        }
+        $output .= "<b>Site name:</b> " .Option::get('main', 'site_name') . PHP_EOL;
         $output .= "<b>Message:</b> {$record['message']}".PHP_EOL;
-        $output .= "<b>Time:</b> {$record['datetime']->format($this->dateFormat)}".PHP_EOL;
         $output .= "<b>Channel:</b> {$record['channel']}".PHP_EOL;
+    
+        if(class_exists('\Arrilot\DotEnv\DotEnv')) {
+            $output .= "<b>Environment:</b> ".\Arrilot\DotEnv\DotEnv::get('APP_ENV', 'production').PHP_EOL;
+        }
         
         if(defined('SANDBOX')) {
             $output .= "<b>Sandbox:</b> ".SANDBOX.PHP_EOL;
@@ -42,6 +49,7 @@ class TelegramFormatter extends NormalizerFormatter
         if ($hostname) {
             $output .= "<b>Server:</b> ".$hostname.PHP_EOL;
         }
+        $output .= "<b>Time:</b> {$record['datetime']->format($this->dateFormat)}".PHP_EOL;
 
         if ($record['context']) {
             $output .= PHP_EOL;
