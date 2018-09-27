@@ -2,6 +2,7 @@
 
 namespace Arrilot\BitrixSync;
 
+use Arrilot\BitrixModels\ServiceProvider as BitrixModelsServiceProvider;
 use Arrilot\BitrixSync\Telegram\TelegramFormatter;
 use Arrilot\BitrixSync\Telegram\TelegramHandler;
 use Bitrix\Main\Config\Option;
@@ -23,18 +24,9 @@ class Sync
 {
     protected $name;
     protected $steps = [];
-
-    /**
-     * Название окружения (dev/production).
-     * Используется в письмах для понимания откуда они пришли.
-     *
-     * @var string
-     */
-    protected $env = '';
     
     protected $logDir = '';
     protected $logFile = '';
-    protected $sqlLogsBitrix = false;
     protected $sqlLogsIlluminate = false;
     protected $sharedData = [];
 
@@ -59,16 +51,9 @@ class Sync
     protected $lockFile;
 
     /**
-     * Можно ли допускать наложения синхронизаций одну на другую.
-     *
-     * @var bool
-     */
-    protected $allowOverlapping = false;
-
-    /**
      * @var array
      */
-    protected $emailsForFinalLog = [];
+    protected $config = [];
     
     public function __construct($name)
     {
@@ -77,7 +62,6 @@ class Sync
         }
 
         $this->name = $name;
-        $this->env = $this->env();
 
         $this->logDir = $this->logDir($name);
         if (!file_exists($this->logDir)) {
@@ -91,6 +75,17 @@ class Sync
         $this->logger->pushHandler($handler);
 
         $this->lockFile = $this->logDir . '/' . $this->name . '_is_in_process.lock';
+        $userConfig = (new Config())->get('bitrix-sync', []);
+        $this->config = [
+            'allowOverlapping' => isset($userConfig['allowOverlapping']) ? (bool) $userConfig['allowOverlapping'] : false,
+            'profileSql' => isset($userConfig['profileSql']) ? (bool) $userConfig['profileSql'] : false,
+            'emailAlertsTo' => isset($userConfig['emailAlertsTo']) ? (array) $userConfig['emailAlertsTo'] : [],
+            'emailFinalLogTo' => isset($userConfig['emailFinalLogTo']) ? (array) $userConfig['emailFinalLogTo'] : [],
+            'sendAlertsToTelegram' => isset($userConfig['sendAlertsToTelegram']) ? (array) $userConfig['sendAlertsToTelegram'] : [],
+            'cleanOldLogs' => isset($userConfig['cleanOldLogs']) ? (int) $userConfig['cleanOldLogs'] : 30,
+            'sendOutputToEcho' => isset($userConfig['sendOutputToEcho']) ? (bool) $userConfig['sendOutputToEcho'] : false,
+            'env' => isset($userConfig['env']) ? $userConfig['env'] : $this->env()
+        ];
     }
 
     /**
@@ -98,6 +93,7 @@ class Sync
      */
     public function perform()
     {
+        $this->applyConfiguration();
         $this->logger->info('Синхронизация начата');
         $startTime = microtime(true);
         $this->adjustPhpSettings();
@@ -105,14 +101,14 @@ class Sync
         $this->normalizeSteps();
         $this->validateSteps();
 
-        if ($this->sqlLogsBitrix) {
+        if ($this->config['profileSql']) {
             $this->doProfileSql();
         }
 
         foreach ($this->steps as $step) {
             $step
                 ->setLogger($this->logger)
-                ->setSqlLoggingParams($this->sqlLogsBitrix, $this->sqlLogsIlluminate)
+                ->setSqlLoggingParams($this->config['profileSql'], $this->sqlLogsIlluminate)
                 ->setSharedData($this->sharedData);
 
             $step->onBeforeLogStart();
@@ -133,7 +129,7 @@ class Sync
                     'message' => $e->getMessage(),
                     'line' => $e->getLine(),
                 ]);
-    
+
             } catch (StopSyncException $e) {
                 $this->logger->info('Получена команда на завершение синхронизации.', [
                     'message' => $e->getMessage(),
@@ -180,6 +176,44 @@ class Sync
     }
 
     /**
+     * Apply configuration.
+     */
+    protected function applyConfiguration()
+    {
+        if ($this->config['emailAlertsTo']) {
+            $handler = (new NativeMailerHandler($this->config['emailAlertsTo'], $this->getAlertTitle(), $this->emailFrom(), Logger::ALERT))->setFormatter($this->formatterForLogger);
+            $this->logger->pushHandler($handler);
+        }
+
+        if ($this->config['cleanOldLogs']) {
+            $fileSystemIterator = new FilesystemIterator($this->logDir);
+            $now = time();
+            foreach ($fileSystemIterator as $file) {
+                if ($now - $file->getCTime() >= 60 * 60 * 24 * $this->config['cleanOldLogs']) {
+                    unlink($this->logDir . '/' . $file->getFilename());
+                }
+            }
+        }
+
+        if ($this->config['sendAlertsToTelegram']) {
+            $bot = $this->config['sendAlertsToTelegram'][0];
+            $channel = $this->config['sendAlertsToTelegram'][1];
+            if ($bot && $channel) {
+                $handler = new TelegramHandler($bot, $channel, Logger::ALERT);
+                $handler->setFormatter(new TelegramFormatter($this->getAlertTitle()));
+                $this->logger->pushHandler($handler);
+            }
+        }
+
+        if ($this->config['sendOutputToEcho']) {
+            $handler = (new StreamHandler('php://stdout'))->setFormatter($this->formatterForLogger);
+            $this->logger->pushHandler($handler);
+        }
+
+        return $this;
+    }
+
+    /**
      * Установка шагов синхронизации.
      *
      * @param array $steps
@@ -191,7 +225,7 @@ class Sync
 
         return $this;
     }
-    
+
     /**
      * Перезапись названия окружения.
      *
@@ -200,7 +234,7 @@ class Sync
      */
     public function setEnv($env)
     {
-        $this->env = $env;
+        $this->config['env'] = $env;
 
         return $this;
     }
@@ -249,13 +283,13 @@ class Sync
     /**
      * Включает дублирование логов в echo
      *
+     * @param bool $value
      * @return $this
      */
-    public function sendOutputToEcho()
+    public function sendOutputToEcho($value = true)
     {
-        $handler = (new StreamHandler('php://stdout'))->setFormatter($this->formatterForLogger);
-        $this->logger->pushHandler($handler);
-        
+        $this->config['sendOutputToEcho'] = $value;
+
         return $this;
     }
 
@@ -266,7 +300,7 @@ class Sync
     {
         return $this->logger;
     }
-    
+
     /**
      * @param HandlerInterface $handler
      * @return Sync
@@ -277,8 +311,7 @@ class Sync
 
         return $this;
     }
-    
-    
+
     /**
      * Выключает защиту от наложения синхронизаций друг на друга.
      *
@@ -286,22 +319,37 @@ class Sync
      */
     public function allowOverlapping()
     {
-        $this->allowOverlapping = true;
-        
-        return $this;
-    }
-    
-    /**
-     * @return $this
-     */
-    public function profileSql()
-    {
-        $this->sqlLogsBitrix = true;
+        $this->config['allowOverlapping'] = true;
         
         return $this;
     }
 
     /**
+     * Setter for overlapping
+     *
+     * @param boolean $value
+     * @return $this
+     */
+    public function setOverlapping($value)
+    {
+        $this->config['allowOverlapping'] = $value;
+
+        return $this;
+    }
+
+    /**
+     * @param bool $value
+     * @return $this
+     */
+    public function profileSql($value = true)
+    {
+        $this->config['profileSql'] = $value;
+
+        return $this;
+    }
+
+    /**
+     * @deprecated use emailAlertsTo()
      * Посылать ошибки на email. По-умолчанию посылает только критические
      *
      * @param array|string $emails
@@ -310,8 +358,18 @@ class Sync
      */
     public function emailErrorsTo($emails, $level = Logger::ALERT)
     {
-        $handler = (new NativeMailerHandler($emails, $this->getAlertTitle(), $this->emailFrom(), $level))->setFormatter($this->formatterForLogger);
-        $this->logger->pushHandler($handler);
+        return $this->emailAlertsTo($emails);
+    }
+
+    /**
+     * Посылать ошибки уровня alert на email.
+     *
+     * @param array|string $emails
+     * @return $this
+     */
+    public function emailAlertsTo($emails)
+    {
+        $this->config['emailAlertsTo'] = $emails;
 
         return $this;
     }
@@ -321,7 +379,7 @@ class Sync
      */
     protected function getAlertTitle()
     {
-        return sprintf('%s, %s: ошибка синхронизации "%s"', $this->siteName(), $this->env, $this->name);
+        return sprintf('%s, %s: ошибка синхронизации "%s"', $this->siteName(), $this->config['env'], $this->name);
     }
     
     /**
@@ -330,18 +388,11 @@ class Sync
      * @param $bot
      * @param $channel
      * @return $this
-     * @throws \Monolog\Handler\MissingExtensionException
      */
     public function sendAlertsToTelegram($bot, $channel)
     {
-        if (!$bot || !$channel) {
-            return $this;
-        }
+        $this->config['sendAlertsToTelegram'] = [$bot, $channel];
 
-        $handler = new TelegramHandler($bot, $channel, Logger::ALERT);
-        $handler->setFormatter(new TelegramFormatter($this->getAlertTitle()));
-        $this->logger->pushHandler($handler);
-        
         return $this;
     }
 
@@ -353,11 +404,11 @@ class Sync
      */
     public function emailFinalLogTo($emails)
     {
-        $this->emailsForFinalLog = is_array($emails) ? $emails : (array) $emails;
-        
+        $this->config['emailFinalLogTo'] = is_array($emails) ? $emails : (array) $emails;
+
         return $this;
     }
-    
+
     /**
      * Удаляет все логи старше чем $days дней.
      *
@@ -366,21 +417,11 @@ class Sync
      */
     public function cleanOldLogs($days = 30)
     {
-        if ($days === false) {
-            return $this;
-        }
-
-        $fileSystemIterator = new FilesystemIterator($this->logDir);
-        $now = time();
-        foreach ($fileSystemIterator as $file) {
-            if ($now - $file->getCTime() >= 60 * 60 * 24 * $days) {
-                unlink($this->logDir . '/' . $file->getFilename());
-            }
-        }
+        $this->config['cleanOldLogs'] = (int) $days;
 
         return $this;
     }
-    
+
     /**
      * Setter for $logdir.
      *
@@ -406,7 +447,7 @@ class Sync
     {
         return logs_path('syncs/'.$name);
     }
-    
+
     /**
      * Название окружения (dev/production).
      * Используется в письмах для понимания откуда они пришли.
@@ -417,7 +458,7 @@ class Sync
     {
         return class_exists('\Arrilot\DotEnv\DotEnv') ? \Arrilot\DotEnv\DotEnv::get('APP_ENV', 'production') : '';
     }
-    
+
     /**
      * Email с которого посылаются письма.
      *
@@ -428,7 +469,7 @@ class Sync
         $emailFrom =  Option::get('main', 'email_from');
         return $emailFrom ? $emailFrom : 'mail@greensight.ru';
     }
-    
+
     /**
      * Имя сайта которое будет отображено в письмах
      *
@@ -438,7 +479,7 @@ class Sync
     {
         return Option::get('main', 'site_name');
     }
-    
+
     /**
      * Метод для донастройки php/приложения перед началом синхронизации.
      */
@@ -480,7 +521,7 @@ class Sync
      */
     protected function checkIlluminate()
     {
-        return class_exists('Illuminate\Database\Capsule\Manager');
+        return !empty(BitrixModelsServiceProvider::$illuminateDatabaseIsUsed);
     }
 
     /**
@@ -488,13 +529,13 @@ class Sync
      */
     protected function preventOverlapping()
     {
-        if ($this->allowOverlapping) {
+        if ($this->config['allowOverlapping']) {
             return;
         }
 
         // проверяем существование lock-файла
         if (file_exists($this->lockFile)) {
-            $error = $this->env . ': файл '.$this->lockFile. ' уже существует. Импорт остановлен.';
+            $error = $this->config['env'] . ': файл '.$this->lockFile. ' уже существует. Импорт остановлен.';
             $this->logger->alert($error);
             throw new RuntimeException($error);
         }
@@ -570,7 +611,7 @@ class Sync
      */
     protected function doEmailFinalLog()
     {
-        if (!$this->emailsForFinalLog) {
+        if (!$this->config['emailFinalLogTo']) {
             return;
         }
 
@@ -579,12 +620,12 @@ class Sync
             "Content-Type: text/plain; charset=utf-8".PHP_EOL.
             "Content-Transfer-Encoding: 8bit";
 
-        $subject = sprintf('%s, %s: синхронизация "%s" завершёна', $this->siteName(), $this->env, $this->name);
+        $subject = sprintf('%s, %s: синхронизация "%s" завершёна', $this->siteName(), $this->config['env'], $this->name);
         $message = file_get_contents($this->logFile);
         if (!$message) {
             $message = 'Не удалось получить файл-лог ' . $this->logFile;
         }
 
-        mail(implode(',', $this->emailsForFinalLog), $subject, $message, $headers);
+        mail(implode(',', $this->config['emailFinalLogTo']), $subject, $message, $headers);
     }
 }

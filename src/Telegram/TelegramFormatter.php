@@ -33,6 +33,15 @@ class TelegramFormatter extends NormalizerFormatter
         $output .= "<b>Message:</b> {$record['message']}".PHP_EOL;
         $output .= "<b>Time:</b> {$record['datetime']->format($this->dateFormat)}".PHP_EOL;
         $output .= "<b>Channel:</b> {$record['channel']}".PHP_EOL;
+        
+        if(defined('SANDBOX')) {
+            $output .= "<b>Sandbox:</b> ".SANDBOX.PHP_EOL;
+        }
+        
+        $hostname = gethostname();
+        if ($hostname) {
+            $output .= "<b>Server:</b> ".$hostname.PHP_EOL;
+        }
 
         if ($record['context']) {
             $output .= PHP_EOL;
