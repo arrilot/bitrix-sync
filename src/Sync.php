@@ -198,8 +198,10 @@ class Sync
         if ($this->config['sendAlertsToTelegram']) {
             $bot = $this->config['sendAlertsToTelegram'][0];
             $channel = $this->config['sendAlertsToTelegram'][1];
+            $proxy = isset($this->config['sendAlertsToTelegram'][2]) ? $this->config['sendAlertsToTelegram'][2] : '';
             if ($bot && $channel) {
                 $handler = new TelegramHandler($bot, $channel, Logger::ALERT);
+                $handler->setProxy($proxy);
                 $handler->setFormatter(new TelegramFormatter($this->getAlertTitle()));
                 $this->logger->pushHandler($handler);
             }
@@ -387,11 +389,12 @@ class Sync
      *
      * @param $bot
      * @param $channel
+     * @param null $proxy
      * @return $this
      */
-    public function sendAlertsToTelegram($bot, $channel)
+    public function sendAlertsToTelegram($bot, $channel, $proxy = null)
     {
-        $this->config['sendAlertsToTelegram'] = [$bot, $channel];
+        $this->config['sendAlertsToTelegram'] = [$bot, $channel, $proxy];
 
         return $this;
     }
