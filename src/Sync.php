@@ -189,7 +189,7 @@ class Sync
             $fileSystemIterator = new FilesystemIterator($this->logDir);
             $now = time();
             foreach ($fileSystemIterator as $file) {
-                if ($now - $file->getCTime() >= 60 * 60 * 24 * $this->config['cleanOldLogs']) {
+                if ($now - $file->getMTime() >= 60 * 60 * 24 * $this->config['cleanOldLogs']) {
                     unlink($this->logDir . '/' . $file->getFilename());
                 }
             }
